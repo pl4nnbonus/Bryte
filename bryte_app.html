@@ -1,0 +1,953 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Bryte - The Creator OS</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bryte: {
+                black: '#000000',
+                dark: '#121212',
+                gray: '#1E1E1E',
+                accent: '#00FF94', // Neon Green/Mint
+                text: '#FFFFFF',
+                muted: '#8E8E93',
+              }
+            },
+            fontFamily: {
+              sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- Styles -->
+    <style>
+      body {
+        background-color: #000000;
+        color: #ffffff;
+        -webkit-font-smoothing: antialiased;
+        overscroll-behavior: none;
+      }
+      /* Hide scrollbar for clean UI */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      /* Animation Utilities */
+      .text-shadow-sm {
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+      .perspective {
+        perspective: 1000px;
+      }
+    </style>
+
+    <!-- Import Map for React and Libraries -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+        "@google/genai": "https://esm.sh/@google/genai",
+        "clsx": "https://esm.sh/clsx"
+      }
+    }
+    </script>
+    
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+      import React, { useState, useEffect, useRef } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { 
+        Home, Music, Wallet, MessageCircle, BarChart3, Settings, LayoutGrid,
+        Send, ArrowDownLeft, ScanLine, Camera, Loader2, DollarSign, CheckCircle2, PlayCircle, Eye, EyeOff, Wifi, X, Check, ShieldCheck, Lock, Copy, Gift, PiggyBank, Search, TrendingUp, Target, Plus, ShoppingBag,
+        Play, Square, Settings2, Volume2, ArrowLeft, Folder, File, ChevronRight, ChevronDown, Scissors, Upload, Timer, Download, MousePointer2, Trash2, Mic, Mic2, FileAudio, RotateCcw, RotateCw,
+        Image as ImageIcon, Sparkles, Sticker, CheckCheck,
+        Globe, Clock, Disc, Radio, Podcast, User, PenTool,
+        Share2, MoreHorizontal, Video as VideoIcon,
+        Mail, LogOut, AlertTriangle, Edit2, Moon, Database, Smartphone, AtSign, MapPin, Calendar, User as UserIcon,
+        Activity, Zap, LayoutDashboard, ChevronLeft, Share, CreditCard, ZoomIn
+      } from 'lucide-react';
+      import { clsx } from 'clsx';
+      import { GoogleGenAI } from '@google/genai';
+
+      // Shim process.env for the service
+      window.process = { env: { API_KEY: '' } };
+
+      // --- TYPES ---
+      
+      const View = {
+        HOME: 'HOME',
+        FEED: 'FEED',
+        STUDIO: 'STUDIO',
+        WALLET: 'WALLET',
+        DISTRO: 'DISTRO',
+        AI: 'AI',
+        SETTINGS: 'SETTINGS'
+      };
+
+      // --- AUDIO ENGINE SERVICE ---
+
+      class AudioEngine {
+        constructor(onStepChange) {
+          this.ctx = null;
+          this.isPlaying = false;
+          this.currentStep = 0;
+          this.tempo = 130;
+          this.nextNoteTime = 0;
+          this.timerID = undefined;
+          this.scheduleAheadTime = 0.1;
+          this.lookahead = 25.0;
+          this.tracks = [];
+          this.onStepChange = onStepChange;
+          
+          this.isMetronomeOn = false;
+          this.masterGainNode = null;
+          this.masterVolume = 0.8;
+          this.reverbBuffer = null;
+          this.sampleCache = new Map();
+        }
+
+        init() {
+          if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            this.masterGainNode = this.ctx.createGain();
+            this.masterGainNode.gain.value = this.masterVolume;
+            this.masterGainNode.connect(this.ctx.destination);
+            this.reverbBuffer = this.createReverbImpulse(2.0);
+          }
+        }
+        
+        async loadSample(url) {
+            if (!this.ctx) this.init();
+            if (this.sampleCache.has(url)) return this.sampleCache.get(url);
+
+            try {
+                const response = await fetch(url);
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+                this.sampleCache.set(url, audioBuffer);
+                return audioBuffer;
+            } catch (e) {
+                console.error("Failed to load sample:", url, e);
+                return null;
+            }
+        }
+
+        setMasterVolume(volume) {
+            this.masterVolume = Math.max(0, Math.min(1, volume));
+            if (this.masterGainNode && this.ctx) {
+                this.masterGainNode.gain.setValueAtTime(this.masterVolume, this.ctx.currentTime);
+            }
+        }
+
+        createReverbImpulse(duration) {
+          if (!this.ctx) return null;
+          const rate = this.ctx.sampleRate;
+          const length = rate * duration;
+          const impulse = this.ctx.createBuffer(2, length, rate);
+          const left = impulse.getChannelData(0);
+          const right = impulse.getChannelData(1);
+
+          for (let i = 0; i < length; i++) {
+              const n = i / length;
+              const decay = Math.pow(1 - n, 3); 
+              left[i] = (Math.random() * 2 - 1) * decay;
+              right[i] = (Math.random() * 2 - 1) * decay;
+          }
+          return impulse;
+        }
+
+        setTracks(tracks) {
+          this.tracks = tracks;
+        }
+
+        nextNote() {
+          const secondsPerBeat = 60.0 / this.tempo;
+          this.nextNoteTime += 0.25 * secondsPerBeat;
+          this.currentStep++;
+          if (this.currentStep === 16) {
+            this.currentStep = 0;
+          }
+        }
+
+        scheduleNote(stepNumber, time) {
+          if (!this.ctx) return;
+          setTimeout(() => this.onStepChange(stepNumber), (time - this.ctx.currentTime) * 1000);
+
+          if (this.isMetronomeOn && stepNumber % 4 === 0) {
+              this.playMetronomeClick(time, stepNumber === 0);
+          }
+
+          const isAnySolo = this.tracks.some(t => t.solo);
+
+          this.tracks.forEach(track => {
+            const shouldPlay = isAnySolo ? track.solo : !track.muted;
+            if (!shouldPlay) return;
+
+            if (track.steps[stepNumber]) {
+              this.playSound(track, time);
+            }
+            if (track.pianoRollData) {
+              const note = track.pianoRollData.find(n => n.step === stepNumber);
+              if (note) {
+                 this.playSound(track, time, note.note);
+              }
+            }
+          });
+        }
+
+        playMetronomeClick(time, isDownbeat) {
+            if (!this.ctx || !this.masterGainNode) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.connect(gain);
+            gain.connect(this.masterGainNode);
+            
+            osc.frequency.setValueAtTime(isDownbeat ? 1000 : 800, time);
+            gain.gain.setValueAtTime(0.3, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+            
+            osc.start(time);
+            osc.stop(time + 0.05);
+        }
+
+        playSound(track, time, pitchOffset = 0) {
+          if (!this.ctx || !this.masterGainNode) return;
+          
+          let sourceNode = null;
+          
+          if (track.sampleUrl && this.sampleCache.has(track.sampleUrl)) {
+              const buffer = this.sampleCache.get(track.sampleUrl);
+              const src = this.ctx.createBufferSource();
+              src.buffer = buffer;
+              if (pitchOffset !== 0) {
+                  src.playbackRate.value = Math.pow(2, pitchOffset / 12);
+              }
+              sourceNode = src;
+          } else {
+              const osc = this.ctx.createOscillator();
+              sourceNode = osc;
+          }
+
+          const gain = this.ctx.createGain();
+          let inputNode = gain;
+
+          if (track.fx?.eq) {
+              const eq = this.ctx.createBiquadFilter();
+              eq.type = 'highshelf';
+              eq.frequency.value = 3000;
+              eq.gain.value = 10;
+              inputNode.connect(eq);
+              inputNode = eq;
+          }
+
+          if (track.fx?.delay) {
+              const delay = this.ctx.createDelay();
+              delay.delayTime.value = 0.3;
+              const delayGain = this.ctx.createGain();
+              delayGain.gain.value = 0.4;
+              inputNode.connect(delay);
+              delay.connect(delayGain);
+              delayGain.connect(this.masterGainNode);
+          }
+
+          if (track.fx?.reverb && this.reverbBuffer) {
+              const conv = this.ctx.createConvolver();
+              conv.buffer = this.reverbBuffer;
+              const revGain = this.ctx.createGain();
+              revGain.gain.value = 0.5;
+              inputNode.connect(conv);
+              conv.connect(revGain);
+              revGain.connect(this.masterGainNode);
+          }
+
+          inputNode.connect(this.masterGainNode);
+          sourceNode.connect(gain);
+
+          const instrument = track.instrument;
+          
+          if (!track.sampleUrl && sourceNode instanceof OscillatorNode) {
+              const osc = sourceNode;
+              if (instrument === 'kick') {
+                osc.frequency.setValueAtTime(150, time);
+                osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+                gain.gain.setValueAtTime(1 * track.volume, time);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+              } else if (instrument === 'snare') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(100, time);
+                gain.gain.setValueAtTime(0.5 * track.volume, time);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+              } else if (instrument === 'hihat') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, time);
+                gain.gain.setValueAtTime(0.3 * track.volume, time);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+              } else if (instrument === 'bsn' || instrument === 'synth') {
+                const seed = track.name.length;
+                osc.type = seed % 2 === 0 ? 'sawtooth' : 'square';
+                const baseFreq = 261.63 * Math.pow(2, pitchOffset / 12);
+                osc.frequency.setValueAtTime(baseFreq, time);
+                gain.gain.setValueAtTime(0.4 * track.volume, time);
+                gain.gain.linearRampToValueAtTime(0, time + 0.4);
+              }
+          } else {
+              gain.gain.setValueAtTime(1 * track.volume, time);
+              gain.gain.linearRampToValueAtTime(0, time + 2.0);
+          }
+
+          sourceNode.start(time);
+          sourceNode.stop(time + 2.0);
+        }
+
+        scheduler() {
+          while (this.nextNoteTime < this.ctx.currentTime + this.scheduleAheadTime) {
+            this.scheduleNote(this.currentStep, this.nextNoteTime);
+            this.nextNote();
+          }
+          this.timerID = window.setTimeout(this.scheduler.bind(this), this.lookahead);
+        }
+
+        togglePlay() {
+          this.isPlaying = !this.isPlaying;
+          if (this.isPlaying) {
+            if (!this.ctx) this.init();
+            if (this.ctx?.state === 'suspended') this.ctx.resume();
+            this.currentStep = 0;
+            this.nextNoteTime = this.ctx.currentTime;
+            this.scheduler();
+          } else {
+            window.clearTimeout(this.timerID);
+          }
+          return this.isPlaying;
+        }
+      }
+
+      // --- GEMINI SERVICE ---
+      const apiKey = process.env.API_KEY || '';
+      const ai = new GoogleGenAI({ apiKey });
+
+      const generateResponse = async (prompt, history) => {
+        try {
+          const model = 'gemini-2.5-flash-lite';
+          const chat = ai.chats.create({
+            model,
+            config: {
+              systemInstruction: "You are Bryte AI, an advanced assistant inside the Bryte app. You help with music production, financial advice, and coding. Be cool, concise, and helpful.",
+            },
+            history: history,
+          });
+
+          const result = await chat.sendMessage({ message: prompt });
+          return result.text || "I couldn't generate a response.";
+        } catch (error) {
+          console.error("Gemini Error:", error);
+          return "Connection error. Please try again.";
+        }
+      };
+
+      const verifyIdentityWithAI = async (base64Image) => {
+        try {
+          const model = 'gemini-2.5-flash';
+          const response = await ai.models.generateContent({
+            model,
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: base64Image
+                  }
+                },
+                {
+                  text: "Analyze this image. Is this a valid government-issued ID card, driver's license, OR a valid School/Student ID card? It must look like a physical identification card with a photo. Respond strictly with 'YES' if it is a valid ID document (including student/school IDs), or 'NO' if it is not."
+                }
+              ]
+            }
+          });
+
+          const text = response.text?.trim().toUpperCase();
+          return text?.includes('YES') || false;
+        } catch (error) {
+          console.error("ID Verification Error:", error);
+          return false;
+        }
+      };
+
+      // --- COMPONENTS ---
+
+      // BryteLogo
+      const BryteLogo = ({ className }) => {
+        return (
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+            <path d="M30 20 V80 H60 L75 65 L60 50 H30" stroke="currentColor" strokeWidth="6" strokeLinecap="square" strokeLinejoin="miter" />
+            <path d="M60 50 L75 35" stroke="currentColor" strokeWidth="6" strokeLinecap="square" />
+            <path d="M45 50 V65 H60" stroke="currentColor" strokeWidth="4" strokeLinecap="square" />
+          </svg>
+        );
+      };
+
+      // 4-Sided Star Icon (Social Feed)
+      const Star4Icon = ({ size = 24, filled = false }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "#ff0000" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
+          </svg>
+      );
+
+      // SplashScreen
+      const SplashScreen = () => {
+        return (
+          <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-[100] animate-out fade-out duration-1000 fill-mode-forwards delay-[2000ms]">
+            <div className="relative flex flex-col items-center">
+              <BryteLogo className="w-24 h-24 text-bryte-accent animate-pulse" />
+              <h1 className="mt-6 text-3xl font-black text-white tracking-tighter opacity-0 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300 fill-mode-forwards">Bryte</h1>
+              <p className="mt-2 text-bryte-muted text-sm font-medium tracking-widest uppercase opacity-0 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-500 fill-mode-forwards">The Creator OS</p>
+            </div>
+          </div>
+        );
+      };
+
+      // Navigation
+      const Navigation = ({ currentView, setView }) => {
+        const navItems = [
+          { view: View.HOME, icon: LayoutDashboard, label: 'Home' },
+          { view: View.FEED, icon: Zap, label: 'BryteSocial' },
+          { view: View.STUDIO, icon: Music, label: 'BriteCook' },
+          { view: View.AI, icon: MessageCircle, label: 'Bryte Chat' },
+          { view: View.WALLET, icon: Wallet, label: 'BrytePay' },
+          { view: View.DISTRO, icon: BarChart3, label: 'Distro' },
+          { view: View.SETTINGS, icon: Settings, label: 'Settings' },
+        ];
+
+        return (
+          <div className="fixed bottom-0 left-0 right-0 bg-bryte-dark/95 backdrop-blur-md border-t border-bryte-gray px-2 py-2 pb-6 flex justify-between items-center z-40">
+            {navItems.map((item) => {
+              const isActive = currentView === item.view;
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.view}
+                  onClick={() => setView(item.view)}
+                  className={clsx(
+                    "flex flex-col items-center justify-center w-full h-12 transition-all duration-200",
+                    isActive ? "text-bryte-accent transform scale-105" : "text-bryte-muted hover:text-white"
+                  )}
+                >
+                  <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+                  <span className="text-[9px] mt-1 font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      };
+
+      // BrowserOverlay
+      const BrowserOverlay = ({ url, onClose }) => {
+        const [iframeKey, setIframeKey] = useState(0);
+        return (
+          <div className="fixed inset-0 z-[100] bg-[#1e1e1e] flex flex-col animate-in slide-in-from-bottom duration-300">
+            <div className="bg-[#1e1e1e] px-4 py-2 pt-12 pb-3 flex items-center justify-between border-b border-gray-800 shadow-sm z-10">
+               <button onClick={onClose} className="text-bryte-accent font-bold text-base hover:opacity-80 transition">Done</button>
+               <div className="flex-1 mx-6 flex flex-col items-center">
+                   <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-0.5 opacity-70"><Lock size={8} /><span className="font-bold tracking-wider">SECURE</span></div>
+                   <div className="bg-[#2c2c2e] text-white text-xs px-4 py-1.5 rounded-lg w-full max-w-xs text-center truncate flex items-center justify-center gap-2 font-mono">{new URL(url).hostname}</div>
+               </div>
+               <button onClick={() => setIframeKey(p => p + 1)} className="text-white hover:text-gray-300"><RotateCcw size={18} /></button>
+            </div>
+            <div className="flex-1 bg-white relative w-full h-full overflow-hidden">
+               <iframe key={iframeKey} src={url} className="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            </div>
+            <div className="bg-[#1e1e1e]/95 backdrop-blur-xl border-t border-gray-800 p-4 pb-8 flex justify-between items-center px-8 z-10">
+                <button className="text-gray-400 hover:text-white"><ChevronLeft size={24} /></button>
+                <button className="text-gray-400 hover:text-white opacity-50"><ChevronRight size={24} /></button>
+                <button className="text-gray-400 hover:text-white"><Share size={20} /></button>
+                <button onClick={() => setIframeKey(p => p + 1)} className="text-gray-400 hover:text-white opacity-80"><RotateCcw size={20} /></button>
+            </div>
+          </div>
+        );
+      };
+
+      // HomeView
+      const HomeView = ({ balance, brytetag, tracks, onOpenStudio, onOpenWallet }) => {
+        const currentHour = new Date().getHours();
+        const greeting = currentHour < 12 ? 'Good Morning' : currentHour < 18 ? 'Good Afternoon' : 'Good Evening';
+        const totalPlays = tracks.reduce((acc, t) => acc + t.plays, 0);
+
+        return (
+          <div className="flex flex-col h-full bg-black text-white px-6 pt-8 pb-24 overflow-y-auto no-scrollbar">
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h2 className="text-gray-400 text-sm font-medium">{greeting},</h2>
+                <h1 className="text-3xl font-black tracking-tight">{brytetag}</h1>
+              </div>
+              <div className="bg-gray-900 p-2 rounded-full border border-gray-800">
+                <BryteLogo className="w-6 h-6 text-bryte-accent" />
+              </div>
+            </div>
+            <div 
+              onClick={onOpenWallet}
+              className="bg-gradient-to-br from-[#1a1a1a] to-[#111] border border-gray-800 rounded-3xl p-6 mb-6 relative overflow-hidden cursor-pointer hover:border-gray-700 transition group"
+            >
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition">
+                 <Wallet size={80} />
+              </div>
+              <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-1">Total Balance</p>
+              <h2 className="text-4xl font-black mb-4">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h2>
+              <div className="flex items-center gap-2 text-xs font-bold text-green-500 bg-green-900/20 px-3 py-1.5 rounded-full w-fit">
+                 <Activity size={12} /> +12.5% this month
+              </div>
+            </div>
+            <h3 className="font-bold text-lg mb-4">Jump Back In</h3>
+            <div className="grid grid-cols-2 gap-4 mb-8">
+                <div 
+                  onClick={onOpenStudio}
+                  className="bg-[#1e1e1e] rounded-2xl p-5 border border-gray-800 cursor-pointer hover:bg-[#252525] transition flex flex-col justify-between h-32"
+                >
+                   <div className="bg-blue-500/20 w-10 h-10 rounded-full flex items-center justify-center text-blue-500 mb-2">
+                       <Music size={20} />
+                   </div>
+                   <div>
+                       <h4 className="font-bold">BriteCook</h4>
+                       <p className="text-xs text-gray-500">Create new beat</p>
+                   </div>
+                </div>
+                <div className="bg-[#1e1e1e] rounded-2xl p-5 border border-gray-800 cursor-pointer hover:bg-[#252525] transition flex flex-col justify-between h-32">
+                   <div className="bg-purple-500/20 w-10 h-10 rounded-full flex items-center justify-center text-purple-500 mb-2">
+                       <Zap size={20} />
+                   </div>
+                   <div>
+                       <h4 className="font-bold">Trending</h4>
+                       <p className="text-xs text-gray-500">See what's hot</p>
+                   </div>
+                </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- LOGIN VIEW ---
+      const LoginView = ({ onLogin }) => {
+        const [authMode, setAuthMode] = useState('signin');
+        const [loading, setLoading] = useState(false);
+        const [showWelcome, setShowWelcome] = useState(false);
+        const [isExiting, setIsExiting] = useState(false);
+        const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+        const [error, setError] = useState('');
+
+        const completeLogin = () => {
+            setShowWelcome(true);
+            setTimeout(() => {
+                setIsExiting(true);
+                setTimeout(() => { onLogin(); }, 800);
+            }, 1500);
+        };
+
+        const handleSubmit = () => {
+          setError('');
+          if (!formData.email || !formData.password) {
+             setError('Please fill in all fields.');
+             return;
+          }
+
+          if (authMode === 'signin') {
+              setLoading(true); 
+              setTimeout(() => { setLoading(false); completeLogin(); }, 1500);
+          } else if (authMode === 'signup') {
+              if (!formData.name) {
+                 setError('Please enter your name.');
+                 return;
+              }
+              setLoading(true); 
+              // Direct login after signup, no code verification
+              setTimeout(() => { setLoading(false); completeLogin(); }, 1500);
+          }
+        };
+
+        return (
+          <div className={clsx("h-full w-full bg-black flex flex-col items-center justify-center p-6 relative overflow-hidden text-white transition-all duration-700", isExiting && "scale-150 opacity-0")}>
+            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-bryte-accent/10 via-black to-black z-0 pointer-events-none"></div>
+            <div className={clsx("absolute inset-0 bg-bryte-accent z-50 rounded-full pointer-events-none transition-transform duration-700 ease-in-out", isExiting ? "scale-[5]" : "scale-0")}></div>
+
+            {showWelcome ? (
+                <div className="z-40 flex flex-col items-center animate-in fade-in zoom-in duration-500">
+                    <CheckCircle2 size={64} className="text-bryte-accent mb-4" />
+                    <h1 className="text-4xl font-black tracking-tighter">Welcome Brytemate!</h1>
+                    <p className="text-gray-400 mt-2">Loading your OS...</p>
+                </div>
+            ) : (
+                <div className="z-10 flex flex-col items-center w-full max-w-sm relative">
+                  <div className="mb-8 relative">
+                      <div className="absolute inset-0 bg-bryte-accent/20 blur-xl rounded-full animate-pulse"></div>
+                      <BryteLogo className="w-24 h-24 text-bryte-accent relative z-10 animate-in fade-in zoom-in duration-1000" />
+                  </div>
+                  <div className="text-center space-y-2 mb-8">
+                      <h1 className="text-3xl font-black tracking-tighter">{(authMode === 'signup' ? 'Create Account' : 'Welcome Back')}</h1>
+                  </div>
+
+                  <div className="w-full space-y-4 animate-in slide-in-from-bottom duration-300">
+                      {authMode === 'signup' && (
+                          <div className="relative"><UserIcon className="absolute left-4 top-3.5 text-gray-500" size={18} /><input type="text" placeholder="Full Name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full bg-[#111] border border-[#333] rounded-xl pl-12 pr-4 py-3 text-white focus:border-bryte-accent outline-none" /></div>
+                      )}
+                      <div className="relative"><Mail className="absolute left-4 top-3.5 text-gray-500" size={18} /><input type="email" placeholder="Email Address" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full bg-[#111] border border-[#333] rounded-xl pl-12 pr-4 py-3 text-white focus:border-bryte-accent outline-none" /></div>
+                      <div className="relative"><Lock className="absolute left-4 top-3.5 text-gray-500" size={18} /><input type="password" placeholder="Password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="w-full bg-[#111] border border-[#333] rounded-xl pl-12 pr-4 py-3 text-white focus:border-bryte-accent outline-none" /></div>
+
+                      {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+
+                      <button onClick={handleSubmit} disabled={loading} className="w-full bg-white text-black font-bold text-lg py-3 rounded-full hover:bg-gray-200 transition flex items-center justify-center gap-2 mt-2">{loading ? <Loader2 className="animate-spin" /> : (authMode === 'signin' ? 'Sign In' : 'Create Account')}</button>
+
+                      <button onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setError(''); }} className="text-sm text-gray-400 hover:text-white font-medium w-full mt-4">{authMode === 'signin' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}</button>
+                  </div>
+                </div>
+            )}
+          </div>
+        );
+      };
+
+      // --- ONBOARDING & INTRO ---
+      const IntroView = ({ onComplete }) => {
+        const [step, setStep] = useState(0);
+        const slides = [
+          { icon: <Wallet size={48} className="text-bryte-accent" />, title: "BrytePay", desc: "Manage your royalties, spend with your Bryte Visa, and send money instantly." },
+          { icon: <Music size={48} className="text-blue-500" />, title: "BriteCook", desc: "Produce hits in a professional studio. Distribution to all major platforms included." },
+          { icon: <MessageCircle size={48} className="text-purple-500" />, title: "Bryte Chat", desc: "Connect with creators and use AI to generate artwork, code, and lyrics." }
+        ];
+        return (
+          <div className="h-full w-full bg-black flex flex-col items-center justify-between p-8 text-white relative">
+             <div className="flex-1 flex flex-col items-center justify-center text-center gap-6 animate-in slide-in-from-right duration-300" key={step}>
+                 <div className="w-32 h-32 rounded-full bg-white/5 flex items-center justify-center mb-4 ring-1 ring-white/10">{slides[step].icon}</div>
+                 <h2 className="text-3xl font-bold tracking-tight">{slides[step].title}</h2>
+                 <p className="text-gray-400 max-w-xs leading-relaxed">{slides[step].desc}</p>
+             </div>
+             <button onClick={() => step < slides.length - 1 ? setStep(step + 1) : onComplete()} className="bg-bryte-accent text-black p-4 rounded-full font-bold shadow-lg hover:shadow-bryte-accent/50 transition-all"><ArrowRight size={24} /></button>
+          </div>
+        );
+      };
+
+      const OnboardingView = ({ onComplete }) => {
+        const [step, setStep] = useState(1);
+        const [brytetag, setBrytetag] = useState('');
+        const [avatar, setAvatar] = useState('');
+        const [zoom, setZoom] = useState(1);
+        const [personalInfo, setPersonalInfo] = useState({ fullName: '', dob: '', address: '' });
+        const [idVerified, setIdVerified] = useState(false);
+        const [verifyingID, setVerifyingID] = useState(false);
+        const fileInputRef = useRef(null);
+
+        const handleNext = () => {
+          if (step === 1 && brytetag.length > 3) setStep(2);
+          else if (step === 2) { 
+              // If no avatar selected, use default, otherwise use current
+              setAvatar(avatar || `https://ui-avatars.com/api/?name=${brytetag}&background=random`); 
+              setStep(3); 
+          }
+          else if (step === 3) onComplete(`$${brytetag}`, avatar, idVerified);
+        };
+
+        const handleIdUpload = async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setVerifyingID(true);
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+              const base64 = reader.result.replace("data:", "").replace(/^.+,/, "");
+              const valid = await verifyIdentityWithAI(base64);
+              if (valid) setIdVerified(true);
+              setVerifyingID(false);
+          };
+          reader.readAsDataURL(file);
+        };
+
+        return (
+          <div className="h-full w-full bg-black flex flex-col items-center justify-center p-6 text-white overflow-y-auto no-scrollbar">
+            <div className="w-full max-w-sm space-y-8 animate-in slide-in-from-right duration-500 my-auto">
+              <div className="flex gap-2 mb-8 justify-center"><div className={clsx("h-1 w-8 rounded-full", step >= 1 ? "bg-bryte-accent" : "bg-gray-800")}></div><div className={clsx("h-1 w-8 rounded-full", step >= 2 ? "bg-bryte-accent" : "bg-gray-800")}></div><div className={clsx("h-1 w-8 rounded-full", step >= 3 ? "bg-bryte-accent" : "bg-gray-800")}></div></div>
+              
+              {step === 1 && (
+                <div className="text-center space-y-6">
+                   <h2 className="text-2xl font-black">Claim your $brytetag</h2>
+                   <input type="text" value={brytetag} onChange={e => setBrytetag(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} className="w-full bg-[#111] border border-gray-800 rounded-xl py-4 text-center text-lg font-bold outline-none focus:border-bryte-accent" placeholder="$yourname" />
+                   <button onClick={handleNext} disabled={brytetag.length < 3} className="w-full bg-white text-black font-bold py-4 rounded-full">Continue</button>
+                </div>
+              )}
+              {step === 2 && (
+                <div className="text-center space-y-6">
+                   <h2 className="text-2xl font-black">Profile Photo</h2>
+                   <div onClick={() => document.getElementById('avi-upload').click()} className="w-40 h-40 mx-auto rounded-full bg-gray-900 border-dashed border-2 border-gray-700 flex items-center justify-center relative cursor-pointer overflow-hidden group">
+                       {avatar ? (
+                           <img src={avatar} className="w-full h-full object-cover transition-transform duration-100" style={{ transform: `scale(${zoom})` }} />
+                       ) : <ImageIcon size={32} />}
+                       <input id="avi-upload" type="file" className="hidden" onChange={e => { const f = e.target.files[0]; const r = new FileReader(); r.onload = ev => setAvatar(ev.target.result); r.readAsDataURL(f); }} />
+                   </div>
+                   
+                   {avatar && (
+                       <div className="px-4">
+                           <div className="flex items-center gap-2 text-xs text-gray-500 mb-2 justify-center"><ZoomIn size={12}/> Zoom Image</div>
+                           <input type="range" min="1" max="3" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full accent-bryte-accent h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer" />
+                       </div>
+                   )}
+
+                   <button onClick={handleNext} className="w-full bg-white text-black font-bold py-4 rounded-full">Looks Good</button>
+                </div>
+              )}
+              {step === 3 && (
+                 <div className="text-center space-y-6">
+                    <h2 className="text-2xl font-black">Verify Identity</h2>
+                    <div className="bg-[#111] p-4 rounded-xl space-y-3">
+                       <input type="text" placeholder="Full Name" className="w-full bg-black border border-gray-800 rounded p-3 text-sm" onChange={e => setPersonalInfo({...personalInfo, fullName: e.target.value})} />
+                       <input type="date" className="w-full bg-black border border-gray-800 rounded p-3 text-sm text-white" onChange={e => setPersonalInfo({...personalInfo, dob: e.target.value})} />
+                       <input type="text" placeholder="Address" className="w-full bg-black border border-gray-800 rounded p-3 text-sm" onChange={e => setPersonalInfo({...personalInfo, address: e.target.value})} />
+                       <input type="file" ref={fileInputRef} className="hidden" onChange={handleIdUpload} />
+                       {!idVerified ? <button onClick={() => fileInputRef.current.click()} disabled={verifyingID} className="w-full bg-gray-900 py-3 rounded font-bold text-sm flex items-center justify-center gap-2">{verifyingID ? <Loader2 className="animate-spin"/> : <Camera/>} Scan ID</button> : <div className="text-green-500 font-bold flex items-center justify-center gap-2"><Check/> Verified</div>}
+                    </div>
+                    <button onClick={handleNext} className="w-full bg-white text-black font-bold py-4 rounded-full">{idVerified ? 'Finish' : 'Skip (Limited)'}</button>
+                 </div>
+              )}
+            </div>
+          </div>
+        );
+      };
+
+      // --- WALLET VIEW ---
+      const WalletView = ({ balance, transactions, onAddFunds, onSendMoney, onRequestMoney, isVerified, onVerifySuccess, brytetag }) => {
+        const [activeModal, setActiveModal] = useState(null);
+        const [modalAmount, setModalAmount] = useState('');
+        const [modalUser, setModalUser] = useState('');
+        const [showCardDetails, setShowCardDetails] = useState(false);
+        const [showStripe, setShowStripe] = useState(false);
+        
+        // BryteSave
+        const [productSearch, setProductSearch] = useState('');
+        const [foundProduct, setFoundProduct] = useState(null);
+        const [savingsGoals, setSavingsGoals] = useState([]);
+
+        const fileInputRef = useRef(null);
+        
+        const handleVerify = async (e) => {
+            const file = e.target.files?.[0];
+            if(file) {
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const valid = await verifyIdentityWithAI(reader.result.replace("data:", "").replace(/^.+,/, ""));
+                    if(valid) { onVerifySuccess(); onAddFunds(700, 'bonus'); }
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+
+        const handleProductSearch = (e) => {
+            e.preventDefault();
+            setTimeout(() => {
+                setFoundProduct({ name: productSearch, price: Math.floor(Math.random()*500)+50, image: 'https://source.unsplash.com/random/200x200/?product' });
+            }, 1000);
+        };
+
+        return (
+          <div className="flex flex-col h-full px-4 pt-4 pb-24 overflow-y-auto no-scrollbar bg-black text-white font-sans relative">
+             <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-2"><BryteLogo className="w-8 h-8 text-bryte-accent"/><span className="font-extrabold text-2xl">Bryte<span className="text-bryte-accent">Pay</span></span></div>
+                <div className="bg-[#1a1a1a] px-3 py-1 rounded-full text-xs font-mono text-gray-400">{brytetag}</div>
+             </div>
+             
+             {!isVerified && <div className="absolute inset-0 z-20 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center h-[120%]"><Lock className="mb-4 text-red-500"/><h2 className="text-2xl font-bold">Access Locked</h2><button onClick={() => fileInputRef.current.click()} className="bg-white text-black py-3 px-8 rounded-full font-bold mt-4">Verify Identity</button><input type="file" ref={fileInputRef} className="hidden" onChange={handleVerify}/></div>}
+
+             <div className={clsx("flex flex-col items-center justify-center py-6", !isVerified && "blur-md")}>
+                 <h1 className="text-6xl font-extrabold flex items-start"><span className="text-3xl mt-2 mr-1">$</span>{balance.toFixed(2)}</h1>
+                 {!isVerified && <div className="bg-gradient-to-r from-yellow-500 to-pink-500 p-[1px] rounded-2xl mt-4 w-full"><div className="bg-[#1a1a1a] rounded-2xl p-4 flex justify-between items-center"><div className="font-bold">Bonus: $700.00</div><button onClick={() => fileInputRef.current.click()} className="bg-white text-black text-xs font-bold px-3 py-1 rounded-full">Verify To Claim</button></div></div>}
+             </div>
+
+             <div className={clsx("w-full mb-6 perspective group relative aspect-[1.586]", !isVerified && "blur-md")}>
+                 <div className="w-full h-full bg-gradient-to-br from-zinc-900 to-black rounded-2xl border border-zinc-800 p-6 flex flex-col justify-between shadow-2xl relative overflow-hidden">
+                     <div className="flex justify-between items-start"><span className="font-extrabold italic text-2xl">Bryte</span><span className="font-bold italic opacity-80">VISA</span></div>
+                     <div className="flex justify-between items-center"><div className="w-12 h-9 bg-yellow-200 rounded-md"></div><Wifi className="rotate-90 opacity-50"/></div>
+                     <div className="mt-auto"><div className="font-mono text-xl tracking-widest mb-4 flex justify-between">{showCardDetails ? "4532 1234 5678 9012" : "•••• •••• •••• 9012"} <button onClick={() => setShowCardDetails(!showCardDetails)}>{showCardDetails ? <EyeOff/> : <Eye/>}</button></div><div className="flex justify-between items-end"><div><p className="text-[8px] uppercase text-gray-400">Card Holder</p><p className="font-bold uppercase text-sm">Bryte Member</p></div><div className="font-mono text-sm">{showCardDetails ? "12/28" : "••/••"}</div></div></div>
+                 </div>
+             </div>
+
+             <div className="grid grid-cols-3 gap-3 mb-6">
+                 <button onClick={() => setActiveModal('send')} className="bg-[#1a1a1a] border border-gray-800 rounded-xl py-3 flex flex-col items-center"><Send size={18} className="mb-1"/><span className="text-xs font-bold">Send</span></button>
+                 <button onClick={() => setActiveModal('request')} className="bg-[#1a1a1a] border border-gray-800 rounded-xl py-3 flex flex-col items-center"><ArrowDownLeft size={18} className="mb-1"/><span className="text-xs font-bold">Request</span></button>
+                 <button onClick={() => setShowStripe(true)} className="bg-[#1a1a1a] border border-gray-800 rounded-xl py-3 flex flex-col items-center"><Plus size={18} className="mb-1"/><span className="text-xs font-bold">Add Cash</span></button>
+             </div>
+
+             <div className="mb-8">
+                <div className="flex items-center gap-2 mb-3"><PiggyBank size={18} className="text-bryte-accent"/><h3 className="font-bold">BryteSave</h3></div>
+                <div className="bg-[#1a1a1a] border border-gray-800 rounded-2xl p-5">
+                    <form onSubmit={handleProductSearch} className="relative mb-4"><Search className="absolute left-3 top-3 text-gray-500" size={16}/><input type="text" placeholder="Search product goal..." value={productSearch} onChange={e=>setProductSearch(e.target.value)} className="w-full bg-black border border-gray-700 rounded-xl pl-10 py-3 text-sm outline-none" /></form>
+                    {foundProduct && <div className="bg-gray-900 p-3 rounded flex items-center justify-between mb-4"><div><p className="font-bold">{foundProduct.name}</p><p className="text-bryte-accent">${foundProduct.price}</p></div><button onClick={() => { setSavingsGoals([...savingsGoals, {...foundProduct, id: Date.now(), saved: 0}]); setFoundProduct(null); }} className="bg-white text-black text-xs font-bold px-3 py-1 rounded">Start Goal</button></div>}
+                    {savingsGoals.map(g => <div key={g.id} className="bg-black/40 p-3 rounded mb-2"><div className="flex justify-between mb-1"><span className="text-sm font-bold">{g.name}</span><span className="text-xs">${g.saved}/${g.price}</span></div><div className="w-full h-1 bg-gray-800 rounded-full"><div className="h-full bg-bryte-accent" style={{width: `${(g.saved/g.price)*100}%`}}></div></div><button onClick={() => { if(balance>=10){ onSendMoney(10, "BryteSave"); g.saved+=10; setSavingsGoals([...savingsGoals]); }}} className="mt-2 w-full text-[10px] bg-gray-800 py-1 rounded">Add $10</button></div>)}
+                </div>
+             </div>
+             
+             {showStripe && <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"><div className="bg-white text-black p-6 rounded-xl w-full max-w-sm"><h3 className="font-bold text-xl mb-4 flex items-center gap-2"><CreditCard/> Stripe Checkout</h3><p className="text-sm text-gray-500 mb-4">Simulating secure payment...</p><button onClick={() => { setShowStripe(false); onAddFunds(50, 'ad'); }} className="w-full bg-black text-white py-3 rounded font-bold">Pay $50.00</button></div></div>}
+             {activeModal && <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"><div className="bg-[#1e1e1e] w-full max-w-sm rounded-xl p-6"><h3 className="font-bold text-xl mb-4">{activeModal === 'send' ? 'Send' : 'Request'}</h3><input type="number" placeholder="$0.00" value={modalAmount} onChange={e=>setModalAmount(e.target.value)} className="w-full bg-black border border-gray-800 rounded p-3 mb-2"/><input type="text" placeholder="Username" value={modalUser} onChange={e=>setModalUser(e.target.value)} className="w-full bg-black border border-gray-800 rounded p-3 mb-4"/><button onClick={() => { if(activeModal==='send') onSendMoney(Number(modalAmount), modalUser); else onRequestMoney(Number(modalAmount), modalUser); setActiveModal(null); }} className="w-full bg-white text-black font-bold py-3 rounded">Confirm</button><button onClick={()=>setActiveModal(null)} className="w-full mt-2 text-gray-500 text-sm">Cancel</button></div></div>}
+          </div>
+        );
+      };
+
+      // --- STUDIO VIEW (BriteCook) ---
+      const StudioView = ({ onBack }) => {
+         const [loading, setLoading] = useState(true);
+         const [tracks, setTracks] = useState([{id:'1', name:'Sampler 1', instrument:'sampler', steps: Array(16).fill(false), volume:1, muted:false, solo:false}]);
+         const engine = useRef(null);
+         
+         const [browserData, setBrowserData] = useState([
+            {
+              id: 'root-plugins', name: 'Plugin Database', type: 'folder', isOpen: true, children: [
+                {
+                  id: 'bsn-folder', name: 'BSN Plugins', type: 'folder', isOpen: false, children: Array.from({ length: 10 }).map((_, i) => ({
+                    id: `bsn-${i}`, name: `BSN Preset ${i + 1}`, type: 'plugin'
+                  }))
+                }
+              ]
+            },
+            {
+              id: 'root-packs', name: 'Packs', type: 'folder', isOpen: false, children: [
+                { id: 'drums', name: 'Drums', type: 'folder', children: [
+                    { id: 'kicks', name: 'Kicks', type: 'folder', children: [{id: 'k1', name:'Kick_01.wav', type:'file'}] },
+                    { id: 'snares', name: 'Snares', type: 'folder' },
+                    { id: 'hats', name: 'Hats', type: 'folder' }
+                ]},
+                { id: 'instruments', name: 'Instruments', type: 'folder' }
+              ]
+            },
+            {
+              id: 'root-user', name: 'User Imports', type: 'folder', isOpen: true, children: []
+            }
+         ]);
+
+         const toggleFolder = (id) => {
+            const toggle = (nodes) => {
+                return nodes.map(node => {
+                    if (node.id === id) return { ...node, isOpen: !node.isOpen };
+                    if (node.children) return { ...node, children: toggle(node.children) };
+                    return node;
+                });
+            };
+            setBrowserData(toggle(browserData));
+         };
+
+         const renderBrowserNode = (node, depth = 0) => {
+            return (
+                <div key={node.id}>
+                    <div 
+                        className="flex items-center gap-1 py-1 px-2 hover:bg-white/10 cursor-pointer text-xs text-gray-400 select-none"
+                        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                        onClick={(e) => { e.stopPropagation(); node.children ? toggleFolder(node.id) : null; }}
+                    >
+                        {node.children ? (
+                            node.isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+                        ) : <div className="w-3" />}
+                        
+                        {node.type === 'folder' && <Folder size={12} className="text-orange-400" />}
+                        {node.type === 'plugin' && <Settings2 size={12} className="text-green-400" />}
+                        {node.type === 'file' && <Music size={12} className="text-blue-400" />}
+                        
+                        <span className={clsx(node.type === 'plugin' && "text-white")}>{node.name}</span>
+                    </div>
+                    {node.isOpen && node.children && (
+                        <div>{node.children.map(child => renderBrowserNode(child, depth + 1))}</div>
+                    )}
+                </div>
+            );
+         };
+
+         useEffect(() => {
+            setTimeout(() => setLoading(false), 1500);
+            engine.current = new AudioEngine(() => {});
+         }, []);
+
+         return (
+             <div className="fixed inset-0 z-50 bg-[#1e1f26] flex flex-col font-sans">
+                 {loading && <div className="absolute inset-0 bg-black flex flex-col items-center justify-center z-[60] text-white"><BryteLogo className="w-16 h-16 text-[#f5a623] animate-pulse"/><p className="mt-4 font-bold text-[#f5a623]">LOADING BRITECOOK...</p></div>}
+                 <div className="h-14 bg-[#292b35] border-b border-black/30 flex items-center justify-between px-4">
+                     <div className="flex items-center gap-4">
+                         <button onClick={onBack}><ArrowLeft size={20} className="text-gray-400"/></button>
+                         <div className="font-black text-lg text-white">Brite<span className="text-[#f5a623]">Cook</span></div>
+                         <div className="flex gap-2">
+                             <button className="bg-[#333] px-3 py-1 rounded text-xs font-bold text-[#f5a623]" onClick={()=>engine.current?.togglePlay()}>PLAY</button>
+                             <button className="bg-[#333] px-3 py-1 rounded text-xs font-bold text-red-500 flex items-center gap-1"><Mic size={12}/> REC</button>
+                         </div>
+                     </div>
+                     <div className="flex gap-2"><button className="p-2 bg-[#333] rounded"><RotateCcw size={14}/></button><button className="p-2 bg-[#333] rounded"><Settings2 size={14}/></button></div>
+                 </div>
+                 <div className="flex-1 flex">
+                     <div className="w-64 bg-[#23252d] border-r border-black/30 flex flex-col">
+                        <div className="p-2 text-xs font-bold text-[#f5a623] mb-2 uppercase bg-[#292b35] border-b border-black/30">Browser</div>
+                        <div className="flex-1 overflow-y-auto no-scrollbar">
+                            {browserData.map(node => renderBrowserNode(node))}
+                        </div>
+                     </div>
+                     <div className="flex-1 bg-[#1e1f26] p-4">
+                         {tracks.map(t => (
+                             <div key={t.id} className="flex items-center bg-[#292b35] mb-2 p-1 rounded border border-black/20">
+                                 <div className="w-48 px-2 flex items-center gap-2 border-r border-black/20"><div className="w-1 h-8 bg-green-500 rounded"></div><span className="text-xs font-bold text-gray-300">{t.name}</span><div className="ml-auto flex gap-1"><button className="text-[8px] bg-black/40 px-1 rounded text-red-500">M</button><button className="text-[8px] bg-black/40 px-1 rounded text-green-500">S</button></div></div>
+                                 <div className="flex-1 grid grid-cols-16 gap-1 px-2">{t.steps.map((s,i) => <div key={i} className={clsx("h-8 rounded-sm", s ? "bg-[#d9dee6]" : "bg-[#383a42]", i%4===0?"border-l border-black/50":"")}></div>)}</div>
+                             </div>
+                         ))}
+                         <button onClick={() => setTracks([...tracks, {id: Date.now().toString(), name: 'New Track', instrument:'sampler', steps:Array(16).fill(false)}])} className="w-full py-3 border-2 border-dashed border-white/10 text-white/30 text-xs font-bold mt-4">+ ADD TRACK (DRUMROLL 7 MAX)</button>
+                     </div>
+                 </div>
+             </div>
+         );
+      };
+
+      // --- APP ---
+      const App = () => {
+        const [view, setView] = useState(View.HOME);
+        const [isLoggedIn, setIsLoggedIn] = useState(false);
+        const [isOnboarded, setIsOnboarded] = useState(false);
+        const [showSplash, setShowSplash] = useState(true);
+        const [userData, setUserData] = useState({ tag: '', avatar: '', verified: false });
+
+        useEffect(() => { setTimeout(() => setShowSplash(false), 2500); }, []);
+
+        if (showSplash) return <SplashScreen />;
+        if (!isLoggedIn) return <LoginView onLogin={() => setIsLoggedIn(true)} />;
+        if (!isOnboarded) return <OnboardingView onComplete={(tag, avi, ver) => { setUserData({tag, avatar: avi, verified: ver}); setIsOnboarded(true); }} />;
+
+        return (
+          <div className="h-screen w-screen bg-black text-white font-sans overflow-hidden flex flex-col">
+            <main className="flex-1 relative w-full h-full bg-black overflow-hidden">
+               {view === View.HOME && <HomeView balance={1250.50} brytetag={userData.tag} tracks={[]} onOpenStudio={()=>setView(View.STUDIO)} onOpenWallet={()=>setView(View.WALLET)} />}
+               {view === View.FEED && <div className="p-4 text-center"><h2 className="font-bold">BryteSocial</h2><p className="text-sm text-gray-500">Feed coming soon...</p></div>}
+               {view === View.STUDIO && <StudioView onBack={()=>setView(View.HOME)} />}
+               {view === View.WALLET && <WalletView balance={1250.50} transactions={[]} onAddFunds={()=>{}} onSendMoney={()=>{}} onRequestMoney={()=>{}} isVerified={userData.verified} onVerifySuccess={()=>{setUserData({...userData, verified:true})}} brytetag={userData.tag} />}
+               {view === View.AI && <div className="p-4 text-center"><h2 className="font-bold">Bryte Chat</h2><p className="text-sm text-gray-500">AI integration active</p></div>}
+               {view === View.SETTINGS && <div className="p-6"><h1 className="text-2xl font-black mb-4">Settings</h1><button onClick={()=>window.location.reload()} className="text-red-500 font-bold border border-red-500 px-4 py-2 rounded">Sign Out</button></div>}
+               <Navigation currentView={view} setView={setView} />
+            </main>
+          </div>
+        );
+      };
+
+      const root = createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

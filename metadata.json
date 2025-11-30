@@ -1,0 +1,8 @@
+{
+  "name": "Bryte",
+  "description": "The all-in-one platform for creators and earners. Combine finance, music production, social networking, and AI-powered creation in a single, seamless experience.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
